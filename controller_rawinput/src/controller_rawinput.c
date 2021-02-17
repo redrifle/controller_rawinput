@@ -221,13 +221,17 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         rv = SetupDiEnumDeviceInterfaces(device_enumeration, NULL, &interface_guid, i, &device_interface_data); /* Does the actual enumeration,
                                                                                                                 each time we increase index i
                                                                                                                 to get the next device */      
-        int error = GetLastError();
-        if (error == ERROR_NO_MORE_ITEMS) /* If there are no more devices, break */
-            break;
-        else if (!rv && error != ERROR_NO_MORE_ITEMS) /* Otherwise, we have a legit error */
+        int error;
+        if (!rv)
         {
-            cr_print_error(GetLastError());
-            return EXIT_FAILURE;
+            error = GetLastError();
+            if (error == ERROR_NO_MORE_ITEMS) /* If there are no more devices, break */
+                break;
+            else                              /* Otherwise, we have a legit error */
+            {
+                cr_print_error(GetLastError());
+                return EXIT_FAILURE;
+            }
         }
 
         DWORD required_size = 0;
@@ -249,8 +253,17 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         
         HANDLE current_device = cr_open_device(device_interface_detail_data->DevicePath);
 
-        if (!current_device && GetLastError() == ERROR_ACCESS_DENIED)
-            goto Done;
+        /* If access is denied, device is probably a mouse/keyboard
+        which are not allowed to be accessed by HID clients,
+        therefore we skip them */
+        if (!current_device)
+        {
+            if (GetLastError() == ERROR_ACCESS_DENIED)
+                goto Done;
+
+            cr_print_error(GetLastError());
+            return EXIT_FAILURE;
+        }
 
         cr_printf("OPENED DEVICE: %s\n", device_interface_detail_data->DevicePath);
 
@@ -264,11 +277,18 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
 
         WCHAR product_string[128];
-        HidD_GetProductString(current_device, product_string, sizeof(product_string));
+        product_string[127] = '\0';
+        rv = HidD_GetProductString(current_device, product_string, sizeof(product_string));
+
+        if (!rv)
+        {
+            cr_print_error(GetLastError());
+            return EXIT_FAILURE;
+        }
 
         cr_printf("\t(%S)\n\n", product_string);
 
-        if (wcsncmp(product_string, L"Controller", 10) == 0) /* Good, we found a controller :\ don't blame me for this code blame microsoft */
+        if (wcsncmp(product_string, L"Controller", 10) == 0) /* Good, we found a controller :\ don't blame me blame microsoft */
             index = i;
 
         HidD_FreePreparsedData(preparsed_data);
